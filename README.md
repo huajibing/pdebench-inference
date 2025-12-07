@@ -40,32 +40,40 @@
 
 ## 2. 运行指南
 
-跑通专家模型的推理，有两种方式可以选择：
+### TL;DR
 
-1. **如果要测试模型在整个数据集上的表现，则需要使用 `PDEBench` 项目的代码（该目录中不提供）：**
-   
-   1. Clone PDEBench仓库到本地 
-      ```bash
-      git clone https://github.com/pdebench/PDEBench.git
-      ```
-   2. 按照PDEBench中的 `README.md` 的指导安装依赖；
-   3. 由于PDEBench项目中U-Net推理代码有问题，所以你需要用当前目录下 `PDEBench_patch/train.py` `PDEBench_patch/utils.py` 替换PDEBench项目目录（`PDEBench/`）中的 `pdebench/models/unet/train.py` 和 `pdebench/models/unet/utils.py`；
-   4. 将当前目录下 `PDEBench_patch/run_all_eval.sh` `PDEBench_patch/eval_darcy_unet.py` `PDEBench_patch/eval_pinn_diff_sorp.py` 复制到PDEBench项目目录（`PDEBench/`）下；
-   5. 将上面提到的所有数据集与模型放在PDEBench项目目录（`PDEBench/`）下，不要修改文件名；
-   6. 运行 `run_all_eval.sh` ，它会用完整的数据集来评估所有模型：
-      ```bash
-      chmod +x run_all_eval.sh
-      ./run_all_eval.sh
-      ```
-   7. 运行结束后会生成每一个模型的评估结果（`*.pickle`）。
-   
-   **测试环境**：NVIDIA RTX 4090 (24GB), Python 3.9, Ubuntu 22.04, CUDA 12.8, PyTorch 2.8.0
-   **运行时间**：约 3 min
+首先需要确保以下文件在当前目录（或通过 `--data-dir` 指定的目录）中：
 
-<br>
+**数据集文件：**
+- `2D_DarcyFlow_beta1.0_Train.hdf5` — 2D Darcy Flow 数据
+- `1D_Burgers_Sols_Nu1.0.hdf5` — 1D Burgers 数据
+- `1D_diff-sorp_NA_NA.h5` — 1D Diffusion-Sorption 数据
 
-2. **在PiERN中，我们不需要专家模型进行批量的推理，也不需要读取数据集。因此，为了与其他模块整合起来，我们写了一个轻量化、可以被模块化调用的推理API，即 `pdebench_inference.py`。这个文件不依赖于PDEBench项目的代码。使用说明见 [INFERENCE_API.md](INFERENCE_API.md)**
+**模型文件：**
+- `2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt`
+- `2D_DarcyFlow_beta1.0_Train_FNO.pt`
+- `1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt`
+- `1D_Burgers_Sols_Nu1.0_FNO.pt`
+- `1D_diff-sorp_NA_NA_Unet-PF-20.pt`
+- `1D_diff-sorp_NA_NA_FNO.pt`
+- `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt`
 
-## 3. 评估结果
+安装依赖：
+```python
+pip install torch numpy h5py # 必需依赖
+pip install tqdm # 可选，用于进度条显示
+```
 
-专家模型运行结果（包含 `*.pickle` 与 `Results.pdf`）见 `eval_results/`。
+跑所有模型的推理：
+```python
+python pdebench_inference.py --run-all
+```
+
+默认设置下会在 `inference_results/` 中生成推理结果和评估指标。
+
+> **测试环境**：NVIDIA RTX 4090 (24GB), Python 3.9, Ubuntu 22.04, CUDA 12.8, PyTorch 2.8.0
+> **运行时间**：约 25s
+
+### 更多功能
+
+若要指定模型/数据集，请参考 [批量推理指南](BATCH_INFERENCE_GUIDE.md)；若不需要指定数据集进行推理，请参考 [推理接口文档](INFERENCE_API.md)。

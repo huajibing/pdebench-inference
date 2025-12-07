@@ -327,11 +327,80 @@ class UNet2d(nn.Module):
         return self.conv(dec1)  # [B, out_channels, Nx, Ny]
 
 
+class PINN1d(nn.Module):
+    """
+    Physics-Informed Neural Network (PINN) for 1D time-dependent PDEs.
+
+    This is a simple fully-connected neural network (FNN) that takes (x, t)
+    coordinates as input and outputs the solution u(x, t).
+
+    Architecture: [in_channels] + [hidden_dim] * (num_layers - 1) + [out_channels]
+    where num_layers is the total number of linear layers.
+    Activation: tanh (matching deepxde default)
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 2,  # (x, t) coordinates
+        out_channels: int = 1,
+        hidden_dim: int = 40,
+        num_layers: int = 7,  # Total number of linear layers (including input and output)
+        activation: str = "tanh",
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+
+        # Build layers: num_layers total linear layers
+        # Layer 0: in_channels -> hidden_dim
+        # Layers 1 to num_layers-2: hidden_dim -> hidden_dim
+        # Layer num_layers-1: hidden_dim -> out_channels
+        layers = []
+        # Input layer
+        layers.append(nn.Linear(in_channels, hidden_dim))
+        # Hidden layers (num_layers - 2 of them)
+        for _ in range(num_layers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+        # Output layer
+        layers.append(nn.Linear(hidden_dim, out_channels))
+
+        self.linears = nn.ModuleList(layers)
+
+        # Activation function
+        if activation == "tanh":
+            self.activation = torch.tanh
+        elif activation == "relu":
+            self.activation = torch.relu
+        elif activation == "gelu":
+            self.activation = F.gelu
+        else:
+            self.activation = torch.tanh
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+
+        Args:
+            x: Input coordinates [B, N, 2] or [B*N, 2] where last dim is (x, t)
+
+        Returns:
+            Solution values [B, N, out_channels] or [B*N, out_channels]
+        """
+        # Apply layers with activation (except last layer)
+        for i, layer in enumerate(self.linears[:-1]):
+            x = self.activation(layer(x))
+        # Output layer (no activation, but apply ReLU for non-negative outputs like diffusion-sorption)
+        x = self.linears[-1](x)
+        return torch.relu(x)  # Ensure non-negative output for diffusion-sorption
+
+
 # =============================================================================
 # Model Configuration and Inference
 # =============================================================================
 
-ModelType = Literal["FNO1d", "FNO2d", "UNet1d", "UNet2d"]
+ModelType = Literal["FNO1d", "FNO2d", "UNet1d", "UNet2d", "PINN1d"]
 
 
 @dataclass
@@ -347,6 +416,9 @@ class ModelConfig:
     modes2: int | None = None
     initial_step: int | None = None
     num_channels: int | None = None
+    # PINN specific
+    hidden_dim: int | None = None
+    num_layers: int | None = None
 
 
 def infer_model_config(state_dict: dict[str, torch.Tensor]) -> ModelConfig:
@@ -356,8 +428,31 @@ def infer_model_config(state_dict: dict[str, torch.Tensor]) -> ModelConfig:
     # Detect model type
     is_fno = "fc0.weight" in keys and "conv0.weights1" in keys
     is_unet = "encoder1.enc1conv1.weight" in keys
+    is_pinn = "linears.0.weight" in keys and "linears.0.bias" in keys
 
-    if is_fno:
+    if is_pinn:
+        # PINN model (FNN architecture from deepxde)
+        # Structure: linears.0, linears.1, ..., linears.N
+        # Count number of layers
+        num_layers = sum(1 for k in keys if k.startswith("linears.") and k.endswith(".weight"))
+
+        # Get dimensions from weights
+        first_layer_w = state_dict["linears.0.weight"]  # [hidden_dim, in_channels]
+        last_layer_w = state_dict[f"linears.{num_layers - 1}.weight"]  # [out_channels, hidden_dim]
+
+        in_channels = first_layer_w.shape[1]
+        hidden_dim = first_layer_w.shape[0]
+        out_channels = last_layer_w.shape[0]
+
+        return ModelConfig(
+            model_type="PINN1d",
+            in_channels=in_channels,
+            out_channels=out_channels,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+        )
+
+    elif is_fno:
         # FNO model
         fc0_w = state_dict["fc0.weight"]  # [width, input_dim]
         fc2_w = state_dict["fc2.weight"]  # [num_channels, 128]
@@ -450,6 +545,13 @@ def build_model(config: ModelConfig) -> nn.Module:
             in_channels=config.in_channels,
             out_channels=config.out_channels,
         )
+    elif config.model_type == "PINN1d":
+        return PINN1d(
+            in_channels=config.in_channels,
+            out_channels=config.out_channels,
+            hidden_dim=config.hidden_dim,
+            num_layers=config.num_layers,
+        )
     else:
         raise ValueError(f"Unknown model type: {config.model_type}")
 
@@ -525,6 +627,7 @@ class PDEPredictor:
                 - FNO2d: [B, Nx, Ny, initial_step * num_channels] or [Nx, Ny, initial_step * num_channels]
                 - UNet1d: [B, in_channels, Nx] or [in_channels, Nx]
                 - UNet2d: [B, in_channels, Nx, Ny] or [in_channels, Nx, Ny]
+                - PINN1d: [N, 2] or [B, N, 2] where last dim is (x, t) coordinates
             grid: Optional grid coordinates. If None, will be auto-generated.
                 - FNO1d: [B, Nx, 1]
                 - FNO2d: [B, Nx, Ny, 2]
@@ -550,6 +653,9 @@ class PDEPredictor:
                     grid = torch.from_numpy(grid.astype(np.float32))
                 grid = grid.to(self.device)
                 output = self.model(input_data, grid)
+            elif self.config.model_type == "PINN1d":
+                # PINN takes (x, t) coordinates directly
+                output = self.model(input_data)
             else:
                 # UNet doesn't need grid
                 output = self.model(input_data)
@@ -631,6 +737,10 @@ class PDEPredictor:
             # Expected: [B, C, Nx, Ny]
             if x.dim() == 3:
                 x = x.unsqueeze(0)
+        elif self.config.model_type == "PINN1d":
+            # Expected: [N, 2] where N is number of query points
+            # PINN can handle arbitrary number of points, no batch dim needed
+            pass
         return x
 
     def _generate_grid(self, x: torch.Tensor) -> torch.Tensor:
@@ -715,6 +825,8 @@ class PDEPredictor:
             return f"[B, {self.config.in_channels}, Nx]"
         elif self.config.model_type == "UNet2d":
             return f"[B, {self.config.in_channels}, Nx, Ny]"
+        elif self.config.model_type == "PINN1d":
+            return f"[N, {self.config.in_channels}] where N is number of (x, t) query points"
         return "Unknown"
 
     def __repr__(self) -> str:
@@ -791,22 +903,825 @@ def list_available_models(directory: str | Path = ".") -> list[dict[str, Any]]:
 # Example usage and testing
 # =============================================================================
 
+# =============================================================================
+# Dataset Loading for Batch Inference
+# =============================================================================
+
+try:
+    import h5py
+    HAS_H5PY = True
+except ImportError:
+    HAS_H5PY = False
+
+
+@dataclass
+class TaskConfig:
+    """Configuration for a PDE task."""
+    name: str
+    dataset_file: str
+    model_checkpoints: list[str]
+    initial_step: int = 10
+    reduced_resolution: int = 1
+    reduced_resolution_t: int = 1
+
+
+# Default task configurations
+DEFAULT_TASKS = {
+    "darcy": TaskConfig(
+        name="2D Darcy Flow",
+        dataset_file="2D_DarcyFlow_beta1.0_Train.hdf5",
+        model_checkpoints=[
+            "2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt",
+            "2D_DarcyFlow_beta1.0_Train_FNO.pt",
+        ],
+        initial_step=1,
+        reduced_resolution=2,
+    ),
+    "burgers": TaskConfig(
+        name="1D Burgers",
+        dataset_file="1D_Burgers_Sols_Nu1.0.hdf5",
+        model_checkpoints=[
+            "1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt",
+            "1D_Burgers_Sols_Nu1.0_FNO.pt",
+        ],
+        initial_step=10,
+        reduced_resolution=4,
+        reduced_resolution_t=5,
+    ),
+    "diffsorp": TaskConfig(
+        name="1D Diff-Sorp",
+        dataset_file="1D_diff-sorp_NA_NA.h5",
+        model_checkpoints=[
+            "1D_diff-sorp_NA_NA_Unet-PF-20.pt",
+            "1D_diff-sorp_NA_NA_FNO.pt",
+            "1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt",
+        ],
+        initial_step=10,
+        reduced_resolution=1,
+        reduced_resolution_t=1,
+    ),
+}
+
+
+class PDEDataset:
+    """Base class for PDE dataset loading."""
+
+    def __init__(
+        self,
+        file_path: str | Path,
+        initial_step: int = 10,
+        reduced_resolution: int = 1,
+        reduced_resolution_t: int = 1,
+    ):
+        self.file_path = Path(file_path)
+        self.initial_step = initial_step
+        self.reduced_resolution = reduced_resolution
+        self.reduced_resolution_t = reduced_resolution_t
+
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Return (input, target) for sample idx."""
+        raise NotImplementedError
+
+    def get_batch(self, indices: list[int]) -> tuple[np.ndarray, np.ndarray]:
+        """Get a batch of samples."""
+        inputs, targets = [], []
+        for idx in indices:
+            inp, tgt = self[idx]
+            inputs.append(inp)
+            targets.append(tgt)
+        return np.stack(inputs), np.stack(targets)
+
+
+class DarcyDataset(PDEDataset):
+    """Dataset for 2D Darcy Flow."""
+
+    def __init__(self, file_path: str | Path, reduced_resolution: int = 2, **kwargs):
+        super().__init__(file_path, reduced_resolution=reduced_resolution, **kwargs)
+        self._file = None
+        self._nu = None
+        self._tensor = None
+        self._load_data()
+
+    def _load_data(self):
+        self._file = h5py.File(self.file_path, "r")
+        self._nu = self._file["nu"]  # (N, 128, 128) - input
+        self._tensor = self._file["tensor"]  # (N, 1, 128, 128) - output
+        self._n_samples = self._nu.shape[0]
+
+    def __len__(self) -> int:
+        return self._n_samples
+
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        r = self.reduced_resolution
+        # Input: permeability field (nu) with downsampling
+        nu = self._nu[idx, ::r, ::r]  # (Nx, Ny)
+        # Target: pressure field with downsampling
+        target = self._tensor[idx, 0, ::r, ::r]  # (Nx, Ny)
+        return nu.astype(np.float32), target.astype(np.float32)
+
+    def prepare_input_unet(self, nu: np.ndarray) -> np.ndarray:
+        """Prepare input for UNet2d: [B, 1, Nx, Ny]."""
+        if nu.ndim == 2:
+            return nu[np.newaxis, np.newaxis, :, :]
+        elif nu.ndim == 3:
+            return nu[:, np.newaxis, :, :]
+        return nu
+
+    def prepare_input_fno(self, nu: np.ndarray) -> np.ndarray:
+        """Prepare input for FNO2d: [B, Nx, Ny, 1]."""
+        if nu.ndim == 2:
+            return nu[np.newaxis, :, :, np.newaxis]
+        elif nu.ndim == 3:
+            return nu[:, :, :, np.newaxis]
+        return nu
+
+    def close(self):
+        if self._file:
+            self._file.close()
+
+
+class BurgersDataset(PDEDataset):
+    """Dataset for 1D Burgers equation."""
+
+    def __init__(
+        self,
+        file_path: str | Path,
+        initial_step: int = 10,
+        reduced_resolution: int = 4,
+        reduced_resolution_t: int = 5,
+        **kwargs,
+    ):
+        super().__init__(
+            file_path,
+            initial_step=initial_step,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+        )
+        self._file = None
+        self._tensor = None
+        self._load_data()
+
+    def _load_data(self):
+        self._file = h5py.File(self.file_path, "r")
+        self._tensor = self._file["tensor"]  # (N, 201, 1024)
+        self._n_samples = self._tensor.shape[0]
+
+    def __len__(self) -> int:
+        return self._n_samples
+
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        r = self.reduced_resolution
+        rt = self.reduced_resolution_t
+        # Get full trajectory with downsampling
+        traj = self._tensor[idx, ::rt, ::r]  # (T_down, Nx_down)
+        # Input: first initial_step time steps
+        input_data = traj[:self.initial_step, :]  # (initial_step, Nx)
+        # Target: next time step
+        target = traj[self.initial_step, :]  # (Nx,)
+        return input_data.astype(np.float32), target.astype(np.float32)
+
+    def get_full_trajectory(self, idx: int) -> np.ndarray:
+        """Get the full downsampled trajectory for autoregressive evaluation."""
+        r = self.reduced_resolution
+        rt = self.reduced_resolution_t
+        return self._tensor[idx, ::rt, ::r].astype(np.float32)
+
+    def prepare_input_unet(self, data: np.ndarray) -> np.ndarray:
+        """Prepare input for UNet1d: [B, T, Nx]."""
+        if data.ndim == 2:
+            return data[np.newaxis, :, :]
+        return data
+
+    def prepare_input_fno(self, data: np.ndarray) -> np.ndarray:
+        """Prepare input for FNO1d: [B, Nx, T]."""
+        if data.ndim == 2:
+            return data.T[np.newaxis, :, :]  # (1, Nx, T)
+        elif data.ndim == 3:
+            return data.transpose(0, 2, 1)  # (B, Nx, T)
+        return data
+
+    def close(self):
+        if self._file:
+            self._file.close()
+
+
+class DiffSorpDataset(PDEDataset):
+    """Dataset for 1D Diffusion-Sorption equation."""
+
+    def __init__(
+        self,
+        file_path: str | Path,
+        initial_step: int = 10,
+        **kwargs,
+    ):
+        super().__init__(file_path, initial_step=initial_step, **kwargs)
+        self._file = None
+        self._seeds = None
+        self._load_data()
+
+    def _load_data(self):
+        self._file = h5py.File(self.file_path, "r")
+        # Get all seed keys (0000, 0001, ...)
+        self._seeds = sorted([k for k in self._file.keys() if k.isdigit()])
+        self._n_samples = len(self._seeds)
+
+    def __len__(self) -> int:
+        return self._n_samples
+
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        seed = self._seeds[idx]
+        # data shape: (101, 1024, 1)
+        data = self._file[seed]["data"][:]
+        data = data.squeeze(-1)  # (101, 1024)
+        # Input: first initial_step time steps
+        input_data = data[:self.initial_step, :]  # (initial_step, Nx)
+        # Target: next time step
+        target = data[self.initial_step, :]  # (Nx,)
+        return input_data.astype(np.float32), target.astype(np.float32)
+
+    def get_full_trajectory(self, idx: int) -> np.ndarray:
+        """Get the full trajectory for autoregressive evaluation."""
+        seed = self._seeds[idx]
+        data = self._file[seed]["data"][:]
+        return data.squeeze(-1).astype(np.float32)
+
+    def prepare_input_unet(self, data: np.ndarray) -> np.ndarray:
+        """Prepare input for UNet1d: [B, T, Nx]."""
+        if data.ndim == 2:
+            return data[np.newaxis, :, :]
+        return data
+
+    def prepare_input_fno(self, data: np.ndarray) -> np.ndarray:
+        """Prepare input for FNO1d: [B, Nx, T]."""
+        if data.ndim == 2:
+            return data.T[np.newaxis, :, :]  # (1, Nx, T)
+        elif data.ndim == 3:
+            return data.transpose(0, 2, 1)  # (B, Nx, T)
+        return data
+
+    def get_pinn_coords_and_target(self, idx: int, t_idx: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get (x, t) coordinates and target values for PINN evaluation.
+
+        For Diff-Sorp: x in [0, 1], t in [0, 500]
+
+        Args:
+            idx: Sample index
+            t_idx: Specific time step index (default: evaluate at t=initial_step)
+
+        Returns:
+            coords: [N, 2] array of (x, t) coordinates
+            target: [N,] array of target values
+        """
+        seed = self._seeds[idx]
+        data = self._file[seed]["data"][:]  # (101, 1024, 1)
+        data = data.squeeze(-1)  # (101, 1024)
+
+        # Get spatial and temporal grids
+        n_t, n_x = data.shape
+        x_coords = np.linspace(0, 1, n_x)
+        t_max = 500.0  # Diff-Sorp has t in [0, 500]
+        t_coords = np.linspace(0, t_max, n_t)
+
+        if t_idx is None:
+            t_idx = self.initial_step
+
+        # Create (x, t) coordinate pairs for the specific time step
+        t_val = t_coords[t_idx]
+        coords = np.stack([x_coords, np.full(n_x, t_val)], axis=-1)  # [Nx, 2]
+        target = data[t_idx, :]  # [Nx,]
+
+        return coords.astype(np.float32), target.astype(np.float32)
+
+    def get_pinn_full_coords_and_target(self, idx: int, n_last_time_steps: int = 20) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get (x, t) coordinates and target values for PINN evaluation over multiple time steps.
+
+        Args:
+            idx: Sample index
+            n_last_time_steps: Number of last time steps to evaluate
+
+        Returns:
+            coords: [N, 2] array of (x, t) coordinates
+            target: [N,] array of target values
+        """
+        seed = self._seeds[idx]
+        data = self._file[seed]["data"][:]  # (101, 1024, 1)
+        data = data.squeeze(-1)  # (101, 1024)
+
+        # Get spatial and temporal grids
+        n_t, n_x = data.shape
+        x_coords = np.linspace(0, 1, n_x)
+        t_max = 500.0
+        t_coords = np.linspace(0, t_max, n_t)
+
+        # Get last n time steps
+        t_indices = range(n_t - n_last_time_steps, n_t)
+
+        all_coords = []
+        all_targets = []
+        for t_idx in t_indices:
+            t_val = t_coords[t_idx]
+            coords = np.stack([x_coords, np.full(n_x, t_val)], axis=-1)
+            all_coords.append(coords)
+            all_targets.append(data[t_idx, :])
+
+        coords = np.concatenate(all_coords, axis=0)  # [n_last_time_steps * Nx, 2]
+        target = np.concatenate(all_targets, axis=0)  # [n_last_time_steps * Nx,]
+
+        return coords.astype(np.float32), target.astype(np.float32)
+
+    def close(self):
+        if self._file:
+            self._file.close()
+
+
+# =============================================================================
+# Batch Inference Runner
+# =============================================================================
+
+@dataclass
+class InferenceResult:
+    """Results from batch inference."""
+    model_name: str
+    task_name: str
+    n_samples: int
+    mse: float
+    mae: float
+    predictions: np.ndarray | None = None
+    targets: np.ndarray | None = None
+
+
+def run_batch_inference(
+    predictor: PDEPredictor,
+    dataset: PDEDataset,
+    sample_indices: list[int] | None = None,
+    batch_size: int = 32,
+    save_predictions: bool = True,
+    show_progress: bool = True,
+) -> InferenceResult:
+    """
+    Run batch inference on a dataset.
+
+    Args:
+        predictor: PDEPredictor instance
+        dataset: PDEDataset instance
+        sample_indices: Indices of samples to evaluate (default: all)
+        batch_size: Batch size for inference
+        save_predictions: Whether to save all predictions
+        show_progress: Whether to show progress bar
+
+    Returns:
+        InferenceResult with metrics and optionally predictions
+    """
+    if sample_indices is None:
+        sample_indices = list(range(len(dataset)))
+
+    n_samples = len(sample_indices)
+    all_predictions = []
+    all_targets = []
+    total_mse = 0.0
+    total_mae = 0.0
+
+    # Determine input preparation function based on model type
+    is_fno = predictor.config.model_type in ("FNO1d", "FNO2d")
+    if isinstance(dataset, DarcyDataset):
+        prepare_fn = dataset.prepare_input_fno if is_fno else dataset.prepare_input_unet
+    else:
+        prepare_fn = dataset.prepare_input_fno if is_fno else dataset.prepare_input_unet
+
+    # Create progress iterator
+    n_batches = (n_samples + batch_size - 1) // batch_size
+    batch_iter = range(0, n_samples, batch_size)
+
+    if show_progress:
+        try:
+            from tqdm import tqdm
+            batch_iter = tqdm(batch_iter, total=n_batches, desc="Inference", unit="batch")
+        except ImportError:
+            print(f"Processing {n_samples} samples in {n_batches} batches...")
+
+    for batch_start in batch_iter:
+        batch_end = min(batch_start + batch_size, n_samples)
+        batch_indices = sample_indices[batch_start:batch_end]
+
+        # Get batch data
+        inputs, targets = dataset.get_batch(batch_indices)
+
+        # Prepare input for model
+        model_input = prepare_fn(inputs)
+
+        # Run inference
+        predictions = predictor.predict(model_input)
+
+        # Post-process predictions based on model type
+        if predictor.config.model_type == "FNO2d":
+            # FNO2d output: [B, Nx, Ny, 1, 1] -> [B, Nx, Ny]
+            predictions = predictions.squeeze(-1).squeeze(-1)
+        elif predictor.config.model_type == "UNet2d":
+            # UNet2d output: [B, 1, Nx, Ny] -> [B, Nx, Ny]
+            predictions = predictions.squeeze(1)
+        elif predictor.config.model_type == "FNO1d":
+            # FNO1d output: [B, Nx, 1, 1] -> [B, Nx]
+            predictions = predictions.squeeze(-1).squeeze(-1)
+        elif predictor.config.model_type == "UNet1d":
+            # UNet1d output: [B, 1, Nx] -> [B, Nx]
+            predictions = predictions.squeeze(1)
+
+        # Calculate metrics
+        mse = np.mean((predictions - targets) ** 2)
+        mae = np.mean(np.abs(predictions - targets))
+        total_mse += mse * len(batch_indices)
+        total_mae += mae * len(batch_indices)
+
+        if save_predictions:
+            all_predictions.append(predictions)
+            all_targets.append(targets)
+
+    # Aggregate results
+    avg_mse = total_mse / n_samples
+    avg_mae = total_mae / n_samples
+
+    predictions_array = np.concatenate(all_predictions, axis=0) if save_predictions else None
+    targets_array = np.concatenate(all_targets, axis=0) if save_predictions else None
+
+    return InferenceResult(
+        model_name=predictor.config.model_type,
+        task_name=type(dataset).__name__.replace("Dataset", ""),
+        n_samples=n_samples,
+        mse=float(avg_mse),
+        mae=float(avg_mae),
+        predictions=predictions_array,
+        targets=targets_array,
+    )
+
+
+def run_pinn_inference(
+    predictor: PDEPredictor,
+    dataset: DiffSorpDataset,
+    sample_indices: list[int] | None = None,
+    save_predictions: bool = True,
+    show_progress: bool = True,
+) -> InferenceResult:
+    """
+    Run PINN inference on DiffSorp dataset.
+
+    PINN models take (x, t) coordinates directly as input, unlike FNO/UNet models
+    that take time series data. This function handles the coordinate-based evaluation.
+
+    Args:
+        predictor: PDEPredictor instance with PINN model
+        dataset: DiffSorpDataset instance
+        sample_indices: Indices of samples to evaluate (default: all)
+        save_predictions: Whether to save all predictions
+        show_progress: Whether to show progress bar
+
+    Returns:
+        InferenceResult with metrics and optionally predictions
+    """
+    if sample_indices is None:
+        sample_indices = list(range(len(dataset)))
+
+    n_samples = len(sample_indices)
+    all_predictions = []
+    all_targets = []
+    total_mse = 0.0
+    total_mae = 0.0
+
+    # Create progress iterator
+    sample_iter = sample_indices
+    if show_progress:
+        try:
+            from tqdm import tqdm
+            sample_iter = tqdm(sample_indices, desc="PINN Inference", unit="sample")
+        except ImportError:
+            print(f"Processing {n_samples} samples...")
+
+    for idx in sample_iter:
+        # Get (x, t) coordinates and target for this sample
+        # Evaluate at the initial_step time point (same as other models)
+        coords, target = dataset.get_pinn_coords_and_target(idx)
+
+        # Run inference
+        predictions = predictor.predict(coords)  # [N, 1]
+        predictions = predictions.squeeze(-1)  # [N,]
+
+        # Calculate metrics
+        mse = np.mean((predictions - target) ** 2)
+        mae = np.mean(np.abs(predictions - target))
+        total_mse += mse
+        total_mae += mae
+
+        if save_predictions:
+            all_predictions.append(predictions)
+            all_targets.append(target)
+
+    # Aggregate results
+    avg_mse = total_mse / n_samples
+    avg_mae = total_mae / n_samples
+
+    predictions_array = np.stack(all_predictions, axis=0) if save_predictions else None
+    targets_array = np.stack(all_targets, axis=0) if save_predictions else None
+
+    return InferenceResult(
+        model_name=predictor.config.model_type,
+        task_name=type(dataset).__name__.replace("Dataset", ""),
+        n_samples=n_samples,
+        mse=float(avg_mse),
+        mae=float(avg_mae),
+        predictions=predictions_array,
+        targets=targets_array,
+    )
+
+
+def save_results(
+    result: InferenceResult,
+    output_dir: str | Path,
+    model_name: str,
+    save_predictions: bool = True,
+) -> Path:
+    """
+    Save inference results to files.
+
+    Args:
+        result: InferenceResult instance
+        output_dir: Output directory
+        model_name: Model name for file naming
+        save_predictions: Whether to save prediction arrays
+
+    Returns:
+        Path to the results directory
+    """
+    import json
+    from datetime import datetime
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save metrics
+    metrics = {
+        "model_name": model_name,
+        "task_name": result.task_name,
+        "n_samples": result.n_samples,
+        "mse": result.mse,
+        "mae": result.mae,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    metrics_file = output_dir / f"{model_name}_metrics.json"
+    with open(metrics_file, "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    # Save predictions and targets
+    if save_predictions and result.predictions is not None:
+        np.save(output_dir / f"{model_name}_predictions.npy", result.predictions)
+        np.save(output_dir / f"{model_name}_targets.npy", result.targets)
+
+    return output_dir
+
+
+def run_all_models(
+    data_dir: str | Path = ".",
+    output_dir: str | Path = "inference_results",
+    tasks: list[str] | None = None,
+    models: list[str] | None = None,
+    n_samples: int | None = None,
+    batch_size: int = 32,
+    save_predictions: bool = True,
+    device: str | None = None,
+) -> dict[str, InferenceResult]:
+    """
+    Run inference on all available models and datasets.
+
+    Args:
+        data_dir: Directory containing datasets and model checkpoints
+        output_dir: Directory to save results
+        tasks: List of tasks to evaluate (default: all available)
+        models: List of specific model files to use (default: all for each task)
+        n_samples: Number of samples to evaluate (default: all)
+        batch_size: Batch size for inference
+        save_predictions: Whether to save prediction arrays
+        device: Device to run on (default: auto)
+
+    Returns:
+        Dictionary mapping model names to InferenceResult
+    """
+    if not HAS_H5PY:
+        raise ImportError("h5py is required for batch inference. Install with: pip install h5py")
+
+    data_dir = Path(data_dir)
+    output_dir = Path(output_dir)
+
+    if tasks is None:
+        tasks = list(DEFAULT_TASKS.keys())
+
+    results = {}
+
+    for task_name in tasks:
+        if task_name not in DEFAULT_TASKS:
+            print(f"Warning: Unknown task '{task_name}', skipping...")
+            continue
+
+        task_config = DEFAULT_TASKS[task_name]
+        dataset_path = data_dir / task_config.dataset_file
+
+        if not dataset_path.exists():
+            print(f"Warning: Dataset not found: {dataset_path}, skipping task '{task_name}'...")
+            continue
+
+        print(f"\n{'='*60}")
+        print(f"Task: {task_config.name}")
+        print(f"Dataset: {dataset_path.name}")
+        print(f"{'='*60}")
+
+        # Load dataset
+        if task_name == "darcy":
+            dataset = DarcyDataset(
+                dataset_path,
+                reduced_resolution=task_config.reduced_resolution,
+            )
+        elif task_name == "burgers":
+            dataset = BurgersDataset(
+                dataset_path,
+                initial_step=task_config.initial_step,
+                reduced_resolution=task_config.reduced_resolution,
+                reduced_resolution_t=task_config.reduced_resolution_t,
+            )
+        elif task_name == "diffsorp":
+            dataset = DiffSorpDataset(
+                dataset_path,
+                initial_step=task_config.initial_step,
+            )
+        else:
+            continue
+
+        # Determine sample indices
+        total_samples = len(dataset)
+        if n_samples is not None:
+            sample_indices = list(range(min(n_samples, total_samples)))
+        else:
+            sample_indices = list(range(total_samples))
+
+        print(f"Total samples: {total_samples}, Evaluating: {len(sample_indices)}")
+
+        # Get model checkpoints to evaluate
+        if models is not None:
+            checkpoints = [m for m in models if any(m.endswith(c) or c in m for c in task_config.model_checkpoints)]
+        else:
+            checkpoints = task_config.model_checkpoints
+
+        for ckpt_name in checkpoints:
+            ckpt_path = data_dir / ckpt_name
+            if not ckpt_path.exists():
+                print(f"  Warning: Checkpoint not found: {ckpt_path}, skipping...")
+                continue
+
+            print(f"\n  Model: {ckpt_name}")
+            print(f"  Loading model...")
+
+            try:
+                predictor = PDEPredictor.load(ckpt_path, device=device)
+                print(f"  Model type: {predictor.config.model_type}")
+
+                # Use different inference function for PINN models
+                if predictor.config.model_type == "PINN1d" and isinstance(dataset, DiffSorpDataset):
+                    result = run_pinn_inference(
+                        predictor,
+                        dataset,
+                        sample_indices=sample_indices,
+                        save_predictions=save_predictions,
+                        show_progress=True,
+                    )
+                else:
+                    result = run_batch_inference(
+                        predictor,
+                        dataset,
+                        sample_indices=sample_indices,
+                        batch_size=batch_size,
+                        save_predictions=save_predictions,
+                        show_progress=True,
+                    )
+
+                print(f"  MSE: {result.mse:.6e}")
+                print(f"  MAE: {result.mae:.6e}")
+
+                # Save results
+                model_key = ckpt_path.stem
+                save_results(result, output_dir / task_name, model_key, save_predictions)
+                results[model_key] = result
+
+            except Exception as e:
+                print(f"  Error: {e}")
+                import traceback
+                traceback.print_exc()
+
+        dataset.close()
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("Summary")
+    print(f"{'='*60}")
+    print(f"{'Model':<45} {'MSE':<12} {'MAE':<12}")
+    print("-" * 70)
+    for model_name, result in results.items():
+        print(f"{model_name:<45} {result.mse:<12.6e} {result.mae:<12.6e}")
+
+    # Save summary
+    import json
+    summary = {
+        name: {"mse": r.mse, "mae": r.mae, "n_samples": r.n_samples}
+        for name, r in results.items()
+    }
+    with open(output_dir / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nResults saved to: {output_dir}")
+    return results
+
+
+# =============================================================================
+# CLI Entry Point
+# =============================================================================
+
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="PDEBench Inference Demo")
-    parser.add_argument("--checkpoint", type=str, help="Path to checkpoint file")
-    parser.add_argument("--list", action="store_true", help="List available models")
+    parser = argparse.ArgumentParser(
+        description="PDEBench Unified Inference Script",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # List available models
+  python pdebench_inference.py --list
+
+  # Run inference on all tasks with all models
+  python pdebench_inference.py --run-all
+
+  # Run inference on specific task
+  python pdebench_inference.py --run-all --tasks darcy
+
+  # Run with limited samples
+  python pdebench_inference.py --run-all --n-samples 100
+
+  # Specify output directory
+  python pdebench_inference.py --run-all --output results/
+
+  # Load and test a single model
+  python pdebench_inference.py --checkpoint 2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt
+""",
+    )
+
+    # Mode selection
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--list", action="store_true", help="List available models")
+    mode_group.add_argument("--run-all", action="store_true", help="Run batch inference on all models")
+    mode_group.add_argument("--checkpoint", type=str, help="Load a single checkpoint for testing")
+
+    # Batch inference options
+    parser.add_argument("--tasks", nargs="+", choices=["darcy", "burgers", "diffsorp"],
+                        help="Tasks to evaluate (default: all)")
+    parser.add_argument("--models", nargs="+", help="Specific model checkpoint files to use")
+    parser.add_argument("--n-samples", type=int, help="Number of samples to evaluate (default: all)")
+    parser.add_argument("--batch-size", type=int, default=32, help="Batch size (default: 32)")
+    parser.add_argument("--output", type=str, default="inference_results", help="Output directory")
+    parser.add_argument("--data-dir", type=str, default=".", help="Data directory")
+    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], help="Device to use")
+    parser.add_argument("--no-save-predictions", action="store_true",
+                        help="Don't save prediction arrays (only metrics)")
+
     args = parser.parse_args()
 
     if args.list:
         print("Available models:")
-        for model_info in list_available_models():
+        for model_info in list_available_models(args.data_dir):
             print(f"  {model_info['name']}: {model_info['model_type']}")
+
+        print("\nAvailable tasks:")
+        for task_name, task_config in DEFAULT_TASKS.items():
+            dataset_path = Path(args.data_dir) / task_config.dataset_file
+            status = "found" if dataset_path.exists() else "NOT FOUND"
+            print(f"  {task_name}: {task_config.name}")
+            print(f"    Dataset: {task_config.dataset_file} [{status}]")
+            print(f"    Models: {', '.join(task_config.model_checkpoints)}")
+
+    elif args.run_all:
+        results = run_all_models(
+            data_dir=args.data_dir,
+            output_dir=args.output,
+            tasks=args.tasks,
+            models=args.models,
+            n_samples=args.n_samples,
+            batch_size=args.batch_size,
+            save_predictions=not args.no_save_predictions,
+            device=args.device,
+        )
 
     elif args.checkpoint:
         # Demo: load model and show info
-        predictor = PDEPredictor.load(args.checkpoint)
+        predictor = PDEPredictor.load(args.checkpoint, device=args.device)
         print(predictor)
         print(f"\nExpected input shape: {predictor.input_shape_hint}")
 

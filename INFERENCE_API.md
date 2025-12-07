@@ -2,6 +2,8 @@
 
 本文档介绍 `pdebench_inference.py` 脚本支持的三个 PDE 任务：1D Burgers 方程、1D 扩散-吸附方程和 2D Darcy 流。每个任务包含物理背景、输入输出格式说明和真实数据示例。
 
+---
+
 ## 快速开始
 
 ```python
@@ -101,6 +103,8 @@ pressure = predictor.predict(permeability)
 # pressure.shape = (1, 1, 64, 64)
 ```
 
+---
+
 ## 2. 1D Burgers 方程
 
 ### 2.1 物理背景
@@ -185,6 +189,8 @@ predictions = predictor.predict_autoregressive(initial_velocity, num_steps=20)
 # predictions.shape = (1, 20, 256)
 ```
 
+---
+
 ## 3. 1D Diffusion-Sorption（扩散-吸附方程）
 
 ### 3.1 物理背景
@@ -253,7 +259,7 @@ concentration = np.array([
 # - 吸附作用减缓了传播速度
 ```
 
-### 3.4 使用示例
+### 3.4 使用示例（UNet/FNO）
 
 ```python
 from pdebench_inference import PDEPredictor
@@ -275,6 +281,54 @@ predictions = predictor.predict_autoregressive(initial_concentration, num_steps=
 # predictions.shape = (1, 50, 1024)
 ```
 
+### 3.5 PINN 模型
+
+**PINN（Physics-Informed Neural Network）** 使用完全不同的推理方式：
+
+| 项目 | 说明 |
+|------|------|
+| **输入** | `[N, 2]` — (x, t) 坐标点 |
+| **输出** | `[N, 1]` — 每个点的浓度值 |
+| **优势** | 可直接预测任意时空点，无需自回归迭代 |
+| **架构** | 全连接网络 [2] → [40]×6 → [1]，tanh 激活 |
+
+**PINN 使用示例**：
+
+```python
+from pdebench_inference import PDEPredictor
+import numpy as np
+
+# 加载 PINN 模型
+predictor = PDEPredictor.load("1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt")
+print(predictor)
+# PDEPredictor(
+#   model_type=PINN1d,
+#   input_shape=[N, 2] where N is number of (x, t) query points,
+#   out_channels=1,
+#   device=cpu
+# )
+
+# 直接预测任意 (x, t) 点的浓度
+# 例如：预测 t=250s 时刻，x 从 0 到 1 的浓度分布
+x = np.linspace(0, 1, 1024)
+t = np.full(1024, 250.0)  # t=250 秒
+coords = np.stack([x, t], axis=-1).astype(np.float32)
+
+concentration = predictor.predict(coords)
+# concentration.shape = (1024, 1)
+
+# 预测整个时空域（例如绘制时空演化图）
+x = np.linspace(0, 1, 100)
+t = np.linspace(0, 500, 50)
+xx, tt = np.meshgrid(x, t)
+coords = np.stack([xx.flatten(), tt.flatten()], axis=-1).astype(np.float32)
+
+concentration = predictor.predict(coords).reshape(50, 100)
+# concentration.shape = (50, 100) — 时间 × 空间
+```
+
+---
+
 ## 4. 可用模型总结
 
 | 任务 | 模型 | Checkpoint 文件 | 输入格式 | 预训练参数 |
@@ -285,6 +339,9 @@ predictions = predictor.predict_autoregressive(initial_concentration, num_steps=
 | 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO.pt` | `[B, 256, 10]` | modes=12, width=20 |
 | 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet-PF-20.pt` | `[B, 10, 1024]` | initial_step=10 |
 | 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO.pt` | `[B, 1024, 10]` | modes=16, width=64 |
+| 1D Diff-Sorp | **PINN1d** | `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt` | `[N, 2]` | hidden=40, layers=7 |
+
+---
 
 ## 5. 完整调用示例
 
@@ -317,6 +374,8 @@ pressure = predictor.predict(permeability)
 print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 ```
 
+---
+
 ## 6. 输入尺寸限制（重要）
 
 模型对输入尺寸有严格限制，不符合要求的输入会导致运行时错误。
@@ -335,6 +394,7 @@ print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 |----------|----------|------|
 | **UNet** | Nx, Ny 必须能被 **16** 整除 | 4层池化操作，每层尺寸减半 |
 | **FNO** | Nx, Ny 必须 ≥ **2 × modes** | FFT 频域尺寸需 ≥ modes 参数 |
+| **PINN** | **无限制** | 点查询方式，N 可为任意正整数 |
 
 ### 6.3 各模型具体要求
 
@@ -346,6 +406,7 @@ print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 | FNO1d (Burgers, modes=12) | T₀=10 | Nx ≥ 24 | 24, 50, 100, 256 |
 | UNet1d (Diff-Sorp) | T₀=10 | Nx ∈ {16, 32, 48, 64, ...} | 64, 256, 1024 |
 | FNO1d (Diff-Sorp, modes=16) | T₀=10 | Nx ≥ 32 | 32, 64, 100, 1024 |
+| PINN1d (Diff-Sorp) | 2 (x,t) | **无限制** | 任意 N (如 100, 1024, 10000) |
 
 ### 6.4 示例：有效与无效输入
 
@@ -355,6 +416,7 @@ import numpy as np
 
 predictor_unet = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt")
 predictor_fno = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_FNO.pt")
+predictor_pinn = PDEPredictor.load("1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt")
 
 # ✓ 有效输入
 predictor_unet.predict(np.zeros((1, 1, 64, 64)))   # 64 能被 16 整除
@@ -362,11 +424,19 @@ predictor_unet.predict(np.zeros((1, 1, 128, 128))) # 128 能被 16 整除
 predictor_fno.predict(np.zeros((1, 64, 64, 1)))    # 64 >= 24
 predictor_fno.predict(np.zeros((1, 100, 100, 1)))  # 100 >= 24，FNO 支持任意尺寸
 
+# PINN: 任意数量的查询点都有效
+predictor_pinn.predict(np.zeros((100, 2)))         # 100 个点
+predictor_pinn.predict(np.zeros((10000, 2)))       # 10000 个点
+predictor_pinn.predict(np.zeros((1, 2)))           # 单个点也可以
+
 # ✗ 无效输入
 predictor_unet.predict(np.zeros((1, 1, 100, 100))) # 100 不能被 16 整除
 predictor_unet.predict(np.zeros((1, 2, 64, 64)))   # 通道数 2 != 1
 predictor_fno.predict(np.zeros((1, 20, 20, 1)))    # 20 < 24
+predictor_pinn.predict(np.zeros((100, 3)))         # PINN 期望 2 维输入 (x, t)
 ```
+
+---
 
 ## 7. 数据预处理
 
@@ -395,6 +465,8 @@ def downsample_2d(data, factor):
 |------|-----------|-----------|-----------|
 | 1D Burgers | 201 | 41 | 5 |
 | 1D Diff-Sorp | 101 | 101 | 1 |
+
+---
 
 ## 8. API 参考
 
@@ -434,6 +506,32 @@ def downsample_2d(data, factor):
 扫描目录中的可用模型。
 
 **返回**：模型信息字典列表
+
+### `run_pinn_inference(predictor, dataset, sample_indices=None, save_predictions=True, show_progress=True)`
+
+PINN 模型专用推理函数。
+
+**参数**：
+- `predictor`: `PDEPredictor` 实例（必须是 PINN1d 模型）
+- `dataset`: `DiffSorpDataset` 实例
+- `sample_indices`: 可选，要评估的样本索引列表
+- `save_predictions`: 是否保存预测结果
+- `show_progress`: 是否显示进度条
+
+**返回**：`InferenceResult` 实例，包含 MSE、MAE 等指标
+
+**示例**：
+```python
+from pdebench_inference import PDEPredictor, DiffSorpDataset, run_pinn_inference
+
+predictor = PDEPredictor.load("1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt")
+dataset = DiffSorpDataset("1D_diff-sorp_NA_NA.h5")
+
+result = run_pinn_inference(predictor, dataset, sample_indices=list(range(100)))
+print(f"MSE: {result.mse:.6e}")
+```
+
+---
 
 ## 9. 依赖要求
 
