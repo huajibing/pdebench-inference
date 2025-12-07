@@ -172,7 +172,7 @@ next_velocity = predictor.predict(initial_velocity)
 
 # 自回归预测多个时间步
 predictions = predictor.predict_autoregressive(initial_velocity, num_steps=20)
-# predictions.shape = (1, 256, 20, 1)
+# predictions.shape = (1, 20, 256)
 ```
 
 ## 3. 1D Diffusion-Sorption（扩散-吸附方程）
@@ -258,7 +258,7 @@ next_concentration = predictor.predict(initial_concentration)
 
 # 自回归预测多个时间步
 predictions = predictor.predict_autoregressive(initial_concentration, num_steps=50)
-# predictions.shape = (1, 1024, 50, 1)
+# predictions.shape = (1, 50, 1024)
 ```
 
 ## 4. 可用模型总结
@@ -302,6 +302,8 @@ permeability = np.random.uniform(0.1, 1.0, (1, 1, 64, 64)).astype(np.float32)
 pressure = predictor.predict(permeability)
 print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 ```
+
+---
 
 ## 6. 数据预处理注意事项
 
