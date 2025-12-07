@@ -2,8 +2,6 @@
 
 本文档介绍 `pdebench_inference.py` 脚本支持的三个 PDE 任务：1D Burgers 方程、1D 扩散-吸附方程和 2D Darcy 流。每个任务包含物理背景、输入输出格式说明和真实数据示例。
 
----
-
 ## 快速开始
 
 ```python
@@ -18,8 +16,6 @@ print(predictor)
 # 推理
 output = predictor.predict(input_data)
 ```
-
----
 
 ## 1. 2D Darcy Flow（达西流）
 
@@ -98,8 +94,6 @@ permeability = np.random.uniform(0.1, 1.0, (1, 1, 64, 64)).astype(np.float32)
 pressure = predictor.predict(permeability)
 # pressure.shape = (1, 1, 64, 64)
 ```
-
----
 
 ## 2. 1D Burgers 方程
 
@@ -180,8 +174,6 @@ next_velocity = predictor.predict(initial_velocity)
 predictions = predictor.predict_autoregressive(initial_velocity, num_steps=20)
 # predictions.shape = (1, 256, 20, 1)
 ```
-
----
 
 ## 3. 1D Diffusion-Sorption（扩散-吸附方程）
 
@@ -269,8 +261,6 @@ predictions = predictor.predict_autoregressive(initial_concentration, num_steps=
 # predictions.shape = (1, 1024, 50, 1)
 ```
 
----
-
 ## 4. 可用模型总结
 
 | 任务 | 模型 | Checkpoint 文件 | 输入格式 | 预训练参数 |
@@ -281,8 +271,6 @@ predictions = predictor.predict_autoregressive(initial_concentration, num_steps=
 | 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO.pt` | `[B, 256, 10]` | modes=12, width=20 |
 | 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet-PF-20.pt` | `[B, 10, 1024]` | initial_step=10 |
 | 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO.pt` | `[B, 1024, 10]` | modes=16, width=64 |
-
----
 
 ## 5. 完整调用示例
 
@@ -315,8 +303,6 @@ pressure = predictor.predict(permeability)
 print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 ```
 
----
-
 ## 6. 数据预处理注意事项
 
 ### 6.1 空间分辨率下采样
@@ -344,8 +330,6 @@ def downsample_2d(data, factor):
 |------|-----------|-----------|-----------|
 | 1D Burgers | 201 | 41 | 5 |
 | 1D Diff-Sorp | 101 | 101 | 1 |
-
----
 
 ## 7. API 参考
 
@@ -385,8 +369,6 @@ def downsample_2d(data, factor):
 扫描目录中的可用模型。
 
 **返回**：模型信息字典列表
-
----
 
 ## 8. 依赖要求
 

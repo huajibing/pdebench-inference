@@ -1,46 +1,42 @@
 # PDEBench 专家模型跑通说明
 
----
-
 ## 1. 任务
 
 ### 1.1 1D Diffusion-Sorption
 
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=133020&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=133020&version=8.0)
-Name: 1D_diff-sorp_NA_NA.h5
+- File name: 1D_diff-sorp_NA_NA.h5
 
 **FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/5&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/5&version=2.0)
-Name: 1D_diff-sorp_NA_NA_FNO.pt
+- File name: 1D_diff-sorp_NA_NA_FNO.pt
 
 **PINN模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/2&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/2&version=2.0)
-Name: 1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt
+- File name: 1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt
 
 **U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/6&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/6&version=2.0)
-Name: 1D_diff-sorp_NA_NA_Unet-PF-20.pt
+- File name: 1D_diff-sorp_NA_NA_Unet-PF-20.pt
 
 ### 1.2 2D Darcy Flow
 
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=133219&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=133219&version=8.0)
-Name: 2D_DarcyFlow_beta1.0_Train.hdf5
+- File name: 2D_DarcyFlow_beta1.0_Train.hdf5
 
 **FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/27&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/27&version=2.0)
-Name: DarcyFlow_FNO.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_FNO.pt
+- File name: DarcyFlow_FNO.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_FNO.pt
 
 **U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/34&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/34&version=2.0)
-Name: DarcyFlow_Unet.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt
+- File name: DarcyFlow_Unet.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt
 
 ### 1.3 1D Burgers' Equation
 
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=281365&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=281365&version=8.0)
-Name: 1D_Burgers_Sols_Nu1.0.hdf5
+- File name: 1D_Burgers_Sols_Nu1.0.hdf5
 
 **FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/26&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/26&version=2.0)
-Name: burgers_FNO.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_FNO.pt
+- File name: burgers_FNO.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_FNO.pt
 
 **U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/33&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/33&version=2.0)
-Name: burgers_Unet.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt
-
----
+- File name: burgers_Unet.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt
 
 ## 2. 运行指南
 
@@ -69,8 +65,6 @@ Name: burgers_Unet.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt
 <br>
 
 2. **在PiERN中，我们不需要专家模型进行批量的推理，也不需要读取数据集。因此，为了与其他模块整合起来，我们写了一个轻量化、可以被模块化调用的推理API，即 `pdebench_inference.py`。这个文件不依赖于PDEBench项目的代码。使用说明见 [INFERENCE_API.md](INFERENCE_API.md)**
-
----
 
 ## 3. 评估结果
 
