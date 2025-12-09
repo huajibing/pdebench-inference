@@ -93,14 +93,14 @@ from pdebench_inference import PDEPredictor
 import numpy as np
 
 # 加载模型
-predictor = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt")
+predictor = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_small.pt")
 
-# 创建输入：渗透率场 [B=1, C=1, Nx=64, Ny=64]
-permeability = np.random.uniform(0.1, 1.0, (1, 1, 64, 64)).astype(np.float32)
+# 创建输入：渗透率场 [B=1, C=1, Nx=32, Ny=32]
+permeability = np.random.uniform(0.1, 1.0, (1, 1, 32, 32)).astype(np.float32)
 
 # 预测压力场
 pressure = predictor.predict(permeability)
-# pressure.shape = (1, 1, 64, 64)
+# pressure.shape = (1, 1, 32, 32)
 ```
 
 ---
@@ -134,9 +134,9 @@ Burgers 方程是流体力学中描述激波形成和传播的经典方程，结
 | **时间范围** | `t ∈ [0, 2]` | 201 个时间步 |
 | **数值范围** | 速度: `[0.71, 0.83]` | — |
 
-**UNet1d 输入格式**：`[B, T₀, Nx]`，其中 `T₀=10`（前10个时间步）
+**UNet1d 输入格式**：`[B, T₀, Nx]`，其中 `T₀=5`（前5个时间步），`Nx=64`
 
-**FNO1d 输入格式**：`[B, Nx, T₀]`（时间步在最后一维）
+**FNO1d 输入格式**：`[B, Nx, T₀]`（时间步在最后一维），`Nx=64`，`T₀=5`
 
 ### 2.3 数据示例
 
@@ -175,18 +175,18 @@ from pdebench_inference import PDEPredictor
 import numpy as np
 
 # 加载模型
-predictor = PDEPredictor.load("1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt")
+predictor = PDEPredictor.load("1D_Burgers_Sols_Nu1.0_Unet_small.pt")
 
-# 创建输入：前10个时间步的速度场 [B=1, T=10, Nx=256]
-initial_velocity = np.random.uniform(0.7, 0.85, (1, 10, 256)).astype(np.float32)
+# 创建输入：前5个时间步的速度场 [B=1, T=5, Nx=64]
+initial_velocity = np.random.uniform(0.7, 0.85, (1, 5, 64)).astype(np.float32)
 
 # 预测下一个时间步
 next_velocity = predictor.predict(initial_velocity)
-# next_velocity.shape = (1, 1, 256)
+# next_velocity.shape = (1, 1, 64)
 
 # 自回归预测多个时间步
 predictions = predictor.predict_autoregressive(initial_velocity, num_steps=20)
-# predictions.shape = (1, 20, 256)
+# predictions.shape = (1, 20, 64)
 ```
 
 ---
@@ -223,9 +223,9 @@ predictions = predictor.predict_autoregressive(initial_velocity, num_steps=20)
 | **时间范围** | `t ∈ [0, 500]` | 101 个时间步 |
 | **数值范围** | 浓度: `[0, 1]` | 归一化浓度 |
 
-**UNet1d 输入格式**：`[B, T₀, Nx]`，其中 `T₀=10`
+**UNet1d 输入格式**：`[B, T₀, Nx]`，其中 `T₀=5`，`Nx=64`
 
-**FNO1d 输入格式**：`[B, Nx, T₀]`
+**FNO1d 输入格式**：`[B, Nx, T₀]`，`Nx=64`，`T₀=5`
 
 ### 3.3 数据示例
 
@@ -266,19 +266,19 @@ from pdebench_inference import PDEPredictor
 import numpy as np
 
 # 加载模型
-predictor = PDEPredictor.load("1D_diff-sorp_NA_NA_Unet-PF-20.pt")
+predictor = PDEPredictor.load("1D_diff-sorp_NA_NA_Unet_small.pt")
 
-# 创建输入：前10个时间步的浓度场 [B=1, T=10, Nx=1024]
-initial_concentration = np.zeros((1, 10, 1024), dtype=np.float32)
+# 创建输入：前5个时间步的浓度场 [B=1, T=5, Nx=64]
+initial_concentration = np.zeros((1, 5, 64), dtype=np.float32)
 initial_concentration[:, :, 0] = 1.0  # 左边界恒定浓度
 
 # 预测下一个时间步
 next_concentration = predictor.predict(initial_concentration)
-# next_concentration.shape = (1, 1, 1024)
+# next_concentration.shape = (1, 1, 64)
 
 # 自回归预测多个时间步
-predictions = predictor.predict_autoregressive(initial_concentration, num_steps=50)
-# predictions.shape = (1, 50, 1024)
+predictions = predictor.predict_autoregressive(initial_concentration, num_steps=30)
+# predictions.shape = (1, 30, 64)
 ```
 
 ### 3.5 PINN 模型
@@ -333,12 +333,12 @@ concentration = predictor.predict(coords).reshape(50, 100)
 
 | 任务 | 模型 | Checkpoint 文件 | 输入格式 | 预训练参数 |
 |------|------|----------------|----------|-----------|
-| 2D Darcy Flow | UNet2d | `2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt` | `[B, 1, 64, 64]` | reduced_resolution=2 |
-| 2D Darcy Flow | FNO2d | `2D_DarcyFlow_beta1.0_Train_FNO.pt` | `[B, 64, 64, 1]` | modes=12, width=20 |
-| 1D Burgers | UNet1d | `1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt` | `[B, 10, 256]` | initial_step=10 |
-| 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO.pt` | `[B, 256, 10]` | modes=12, width=20 |
-| 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet-PF-20.pt` | `[B, 10, 1024]` | initial_step=10 |
-| 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO.pt` | `[B, 1024, 10]` | modes=16, width=64 |
+| 2D Darcy Flow | UNet2d | `2D_DarcyFlow_beta1.0_Train_Unet_small.pt` | `[B, 1, 32, 32]` | reduced_resolution=4 |
+| 2D Darcy Flow | FNO2d | `2D_DarcyFlow_beta1.0_Train_FNO_small.pt` | `[B, 32, 32, 1]` | modes=8, width=16 |
+| 1D Burgers | UNet1d | `1D_Burgers_Sols_Nu1.0_Unet_small.pt` | `[B, 5, 64]` | initial_step=5, reduced_resolution=16 |
+| 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO_small.pt` | `[B, 64, 5]` | modes=8, width=16, initial_step=5 |
+| 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet_small.pt` | `[B, 5, 64]` | initial_step=5, reduced_resolution=16 |
+| 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO_small.pt` | `[B, 64, 5]` | modes=8, width=16, initial_step=5 |
 | 1D Diff-Sorp | **PINN1d** | `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt` | `[N, 2]` | hidden=40, layers=7 |
 
 ---
@@ -355,7 +355,7 @@ for m in models:
     print(f"{m['name']}: {m['model_type']}")
 
 # 加载任意模型
-predictor = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt")
+predictor = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_small.pt")
 
 # 查看期望输入格式
 print(predictor)
@@ -367,11 +367,11 @@ print(predictor)
 # )
 
 # 构造输入数据
-permeability = np.random.uniform(0.1, 1.0, (1, 1, 64, 64)).astype(np.float32)
+permeability = np.random.uniform(0.1, 1.0, (1, 1, 32, 32)).astype(np.float32)
 
 # 推理
 pressure = predictor.predict(permeability)
-print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
+print(f"Output shape: {pressure.shape}")  # (1, 1, 32, 32)
 ```
 
 ---
@@ -401,11 +401,11 @@ print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 | 模型 | 通道数 | 空间尺寸要求 | 有效尺寸示例 |
 |------|--------|-------------|-------------|
 | UNet2d (Darcy) | C=1 | Nx, Ny ∈ {16, 32, 48, 64, ...} | 32, 64, 128 |
-| FNO2d (Darcy, modes=12) | C=1 | Nx, Ny ≥ 24 | 24, 32, 64, 100 |
-| UNet1d (Burgers) | T₀=10 | Nx ∈ {16, 32, 48, 64, ...} | 64, 128, 256 |
-| FNO1d (Burgers, modes=12) | T₀=10 | Nx ≥ 24 | 24, 50, 100, 256 |
-| UNet1d (Diff-Sorp) | T₀=10 | Nx ∈ {16, 32, 48, 64, ...} | 64, 256, 1024 |
-| FNO1d (Diff-Sorp, modes=16) | T₀=10 | Nx ≥ 32 | 32, 64, 100, 1024 |
+| FNO2d (Darcy, modes=8) | C=1 | Nx, Ny ≥ 16 | 16, 32, 64 |
+| UNet1d (Burgers) | T₀=5 | Nx ∈ {16, 32, 48, 64, ...} | 32, 64, 128 |
+| FNO1d (Burgers, modes=8) | T₀=5 | Nx ≥ 16 | 16, 32, 64 |
+| UNet1d (Diff-Sorp) | T₀=5 | Nx ∈ {16, 32, 48, 64, ...} | 32, 64, 128 |
+| FNO1d (Diff-Sorp, modes=8) | T₀=5 | Nx ≥ 16 | 16, 32, 64 |
 | PINN1d (Diff-Sorp) | 2 (x,t) | **无限制** | 任意 N (如 100, 1024, 10000) |
 
 ### 6.4 示例：有效与无效输入
@@ -414,15 +414,15 @@ print(f"Output shape: {pressure.shape}")  # (1, 1, 64, 64)
 from pdebench_inference import PDEPredictor
 import numpy as np
 
-predictor_unet = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt")
-predictor_fno = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_FNO.pt")
+predictor_unet = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_small.pt")
+predictor_fno = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_FNO_small.pt")
 predictor_pinn = PDEPredictor.load("1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt")
 
 # ✓ 有效输入
+predictor_unet.predict(np.zeros((1, 1, 32, 32)))   # 32 能被 16 整除
 predictor_unet.predict(np.zeros((1, 1, 64, 64)))   # 64 能被 16 整除
-predictor_unet.predict(np.zeros((1, 1, 128, 128))) # 128 能被 16 整除
-predictor_fno.predict(np.zeros((1, 64, 64, 1)))    # 64 >= 24
-predictor_fno.predict(np.zeros((1, 100, 100, 1)))  # 100 >= 24，FNO 支持任意尺寸
+predictor_fno.predict(np.zeros((1, 32, 32, 1)))    # 32 >= 16
+predictor_fno.predict(np.zeros((1, 64, 64, 1)))    # 64 >= 16，FNO 支持任意尺寸
 
 # PINN: 任意数量的查询点都有效
 predictor_pinn.predict(np.zeros((100, 2)))         # 100 个点
@@ -431,8 +431,8 @@ predictor_pinn.predict(np.zeros((1, 2)))           # 单个点也可以
 
 # ✗ 无效输入
 predictor_unet.predict(np.zeros((1, 1, 100, 100))) # 100 不能被 16 整除
-predictor_unet.predict(np.zeros((1, 2, 64, 64)))   # 通道数 2 != 1
-predictor_fno.predict(np.zeros((1, 20, 20, 1)))    # 20 < 24
+predictor_unet.predict(np.zeros((1, 2, 32, 32)))   # 通道数 2 != 1
+predictor_fno.predict(np.zeros((1, 10, 10, 1)))    # 10 < 16
 predictor_pinn.predict(np.zeros((100, 3)))         # PINN 期望 2 维输入 (x, t)
 ```
 
@@ -446,9 +446,9 @@ predictor_pinn.predict(np.zeros((100, 3)))         # PINN 期望 2 维输入 (x,
 
 | 任务 | 原始分辨率 | 训练分辨率 | 下采样因子 |
 |------|-----------|-----------|-----------|
-| 2D Darcy Flow | 128×128 | 64×64 | 2 |
-| 1D Burgers | 1024 | 256 | 4 |
-| 1D Diff-Sorp | 1024 | 1024 | 1 |
+| 2D Darcy Flow | 128×128 | 32×32 | 4 |
+| 1D Burgers | 1024 | 64 | 16 |
+| 1D Diff-Sorp | 1024 | 64 | 16 |
 
 ```python
 # 下采样示例
@@ -461,10 +461,10 @@ def downsample_2d(data, factor):
 
 ### 7.2 时间分辨率下采样（用于时序任务）
 
-| 任务 | 原始时间步 | 训练时间步 | 下采样因子 |
-|------|-----------|-----------|-----------|
-| 1D Burgers | 201 | 41 | 5 |
-| 1D Diff-Sorp | 101 | 101 | 1 |
+| 任务 | 原始时间步 | 训练时间步 | 下采样因子 | 输入时间步 |
+|------|-----------|-----------|-----------|-----------|
+| 1D Burgers | 201 | 41 | 5 | 5 |
+| 1D Diff-Sorp | 101 | 51 | 2 | 5 |
 
 ---
 

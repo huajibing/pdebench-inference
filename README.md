@@ -1,4 +1,6 @@
-# PDEBench 专家模型跑通说明
+# PDEBench 专家模型推理说明
+
+PKU 机器学习基础 课程项目
 
 ## 1. 任务
 
@@ -7,36 +9,40 @@
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=133020&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=133020&version=8.0)
 - File name: 1D_diff-sorp_NA_NA.h5
 
-**FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/5&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/5&version=2.0)
-- File name: 1D_diff-sorp_NA_NA_FNO.pt
+**FNO模型**：
+- File name: 1D_diff-sorp_NA_NA_FNO_small.pt
 
-**PINN模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/2&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/2&version=2.0)
+**PINN模型**：
 - File name: 1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt
 
-**U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/6&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/6&version=2.0)
-- File name: 1D_diff-sorp_NA_NA_Unet-PF-20.pt
+**U-Net模型**：
+- File name: 1D_diff-sorp_NA_NA_Unet_small-PF-10.pt
 
 ### 1.2 2D Darcy Flow
 
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=133219&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=133219&version=8.0)
 - File name: 2D_DarcyFlow_beta1.0_Train.hdf5
 
-**FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/27&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/27&version=2.0)
-- File name: DarcyFlow_FNO.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_FNO.pt
+**FNO模型**：
+- File name: 2D_DarcyFlow_beta1.0_Train_FNO_small.pt
 
-**U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/34&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/34&version=2.0)
-- File name: DarcyFlow_Unet.tar, 解压后选择 2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt
+**U-Net模型**：
+- File name: 2D_DarcyFlow_beta1.0_Train_Unet_small.pt
 
 ### 1.3 1D Burgers' Equation
 
 **数据集**：[https://darus.uni-stuttgart.de/file.xhtml?fileId=281365&version=8.0](https://darus.uni-stuttgart.de/file.xhtml?fileId=281365&version=8.0)
 - File name: 1D_Burgers_Sols_Nu1.0.hdf5
 
-**FNO模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/26&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/26&version=2.0)
-- File name: burgers_FNO.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_FNO.pt
+**FNO模型**：
+- File name: 1D_Burgers_Sols_Nu1.0_FNO_small.pt
 
-**U-Net模型**：[https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/33&version=2.0](https://darus.uni-stuttgart.de/file.xhtml?persistentId=doi:10.18419/DARUS-2987/33&version=2.0)
-- File name: burgers_Unet.tar, 解压后选择 1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt
+**U-Net模型**：
+- File name: 1D_Burgers_Sols_Nu1.0_Unet_small-PF-10.pt
+
+以上所有模型使用[PDEBench](https://github.com/pdebench/PDEBench)项目进行重新训练，下载链接：[北大网盘](https://disk.pku.edu.cn/link/AAC8AC215DAADC47AF9EDE26F90A461684)
+文件名：models.zip
+有效期限：永久有效
 
 ## 2. 运行指南
 
@@ -50,12 +56,12 @@
 - `1D_diff-sorp_NA_NA.h5` — 1D Diffusion-Sorption 数据
 
 **模型文件：**
-- `2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt`
-- `2D_DarcyFlow_beta1.0_Train_FNO.pt`
-- `1D_Burgers_Sols_Nu1.0_Unet-PF-20.pt`
-- `1D_Burgers_Sols_Nu1.0_FNO.pt`
-- `1D_diff-sorp_NA_NA_Unet-PF-20.pt`
-- `1D_diff-sorp_NA_NA_FNO.pt`
+- `2D_DarcyFlow_beta1.0_Train_Unet_small.pt`
+- `2D_DarcyFlow_beta1.0_Train_FNO_small.pt`
+- `1D_Burgers_Sols_Nu1.0_Unet_small-PF-10.pt`
+- `1D_Burgers_Sols_Nu1.0_FNO_small.pt`
+- `1D_diff-sorp_NA_NA_Unet_small-PF-10.pt`
+- `1D_diff-sorp_NA_NA_FNO_small.pt`
 - `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt`
 
 安装依赖：
@@ -76,4 +82,4 @@ python pdebench_inference.py --run-all
 
 ### 更多功能
 
-若要指定模型/数据集，请参考 [批量推理指南](BATCH_INFERENCE_GUIDE.md)；若不需要指定数据集进行推理，请参考 [推理接口文档](INFERENCE_API.md)。
+若要指定模型/数据集，请参考 [批量推理指南](https://github.com/huajibing/pdebench-inference/blob/main/BATCH_INFERENCE_GUIDE.md)；若不需要指定数据集进行推理，请参考 [推理接口文档](https://github.com/huajibing/pdebench-inference/blob/main/INFERENCE_API.md)。

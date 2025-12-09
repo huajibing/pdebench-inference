@@ -1,6 +1,18 @@
-# PDEBench 数据集批量推理使用指南
+# PDEBench 批量推理使用指南
 
 本指南介绍如何使用 `pdebench_inference.py` 进行批量推理，包括在完整数据集上运行所有模型并保存结果。
+
+---
+
+## 目录
+
+1. [快速开始](#1-快速开始)
+2. [命令行参数详解](#2-命令行参数详解)
+3. [支持的任务和模型](#3-支持的任务和模型)
+4. [输出文件说明](#4-输出文件说明)
+5. [高级用法](#5-高级用法)
+6. [Python API 调用](#6-python-api-调用)
+7. [常见问题](#7-常见问题)
 
 ---
 
@@ -419,3 +431,180 @@ print(f"Predictions shape: {predictions.shape}")  # (4, 1, 64, 64)
 
 dataset.close()
 ```
+
+---
+
+## 7. 常见问题
+
+### Q1: 如何查看可用的模型和数据集？
+
+```bash
+python pdebench_inference.py --list
+```
+
+这会显示所有找到的模型文件和数据集状态。
+
+### Q2: 推理速度太慢？
+
+1. **使用 GPU**：`--device cuda`
+2. **增大批大小**：`--batch-size 64`（需要足够内存）
+3. **减少样本数**：`--n-samples 1000`
+
+### Q3: 内存不足？
+
+1. **减小批大小**：`--batch-size 8`
+2. **不保存预测**：`--no-save-predictions`
+3. **使用 CPU**：`--device cpu`（CPU 内存通常更大）
+
+### Q4: 找不到数据集/模型文件？
+
+使用 `--data-dir` 指定文件所在目录：
+
+```bash
+python pdebench_inference.py --list --data-dir /path/to/data/
+python pdebench_inference.py --run-all --data-dir /path/to/data/
+```
+
+### Q5: 如何只评估特定模型？
+
+```bash
+# 使用 --models 参数
+python pdebench_inference.py --run-all --models 2D_DarcyFlow_beta1.0_Train_FNO.pt
+
+# 或指定多个模型
+python pdebench_inference.py --run-all --models 2D_DarcyFlow_beta1.0_Train_FNO.pt 2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt
+```
+
+### Q6: 如何在代码中获取完整轨迹（用于自回归评估）？
+
+```python
+from pdebench_inference import BurgersDataset
+
+dataset = BurgersDataset("1D_Burgers_Sols_Nu1.0.hdf5")
+
+# 获取完整轨迹
+trajectory = dataset.get_full_trajectory(0)
+print(f"Full trajectory shape: {trajectory.shape}")  # (41, 256)
+
+dataset.close()
+```
+
+### Q7: 输出的 MSE/MAE 与原论文不同？
+
+可能原因：
+1. **样本数不同**：确保使用全部样本
+2. **预处理不同**：检查下采样因子是否一致
+3. **评估方式不同**：本脚本评估单步预测，论文可能使用自回归多步预测
+
+### Q8: 如何自定义评估指标？
+
+```python
+import numpy as np
+from pdebench_inference import PDEPredictor, DarcyDataset, run_batch_inference
+
+# 运行推理
+result = run_batch_inference(predictor, dataset, save_predictions=True)
+
+# 计算自定义指标
+predictions = result.predictions
+targets = result.targets
+
+# 相对误差
+relative_error = np.mean(np.abs(predictions - targets) / (np.abs(targets) + 1e-8))
+
+# RMSE
+rmse = np.sqrt(np.mean((predictions - targets) ** 2))
+
+# 最大误差
+max_error = np.max(np.abs(predictions - targets))
+
+print(f"Relative Error: {relative_error:.6f}")
+print(f"RMSE: {rmse:.6e}")
+print(f"Max Error: {max_error:.6e}")
+```
+
+---
+
+## 附录：完整示例脚本
+
+```python
+#!/usr/bin/env python
+"""完整的批量推理示例脚本"""
+
+from pathlib import Path
+import json
+import numpy as np
+
+from pdebench_inference import (
+    PDEPredictor,
+    DarcyDataset,
+    BurgersDataset,
+    DiffSorpDataset,
+    run_batch_inference,
+    save_results,
+    run_all_models,
+)
+
+
+def main():
+    # 方式1：使用 run_all_models 一键运行
+    print("=" * 60)
+    print("方式1：一键运行所有模型")
+    print("=" * 60)
+
+    results = run_all_models(
+        data_dir=".",
+        output_dir="results_all",
+        n_samples=100,  # 仅用100个样本演示
+        batch_size=32,
+    )
+
+    # 方式2：单独评估特定任务
+    print("\n" + "=" * 60)
+    print("方式2：单独评估 Darcy Flow")
+    print("=" * 60)
+
+    dataset = DarcyDataset("2D_DarcyFlow_beta1.0_Train.hdf5")
+    predictor = PDEPredictor.load("2D_DarcyFlow_beta1.0_Train_Unet_PF_1.pt")
+
+    result = run_batch_inference(
+        predictor,
+        dataset,
+        sample_indices=list(range(50)),
+        batch_size=10,
+    )
+
+    print(f"MSE: {result.mse:.6e}")
+    print(f"MAE: {result.mae:.6e}")
+
+    # 计算额外指标
+    if result.predictions is not None:
+        rmse = np.sqrt(result.mse)
+        max_err = np.max(np.abs(result.predictions - result.targets))
+        print(f"RMSE: {rmse:.6e}")
+        print(f"Max Error: {max_err:.6e}")
+
+    dataset.close()
+
+    print("\n完成！")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 更新日志
+
+- **2025-12-07**: 添加 PINN 模型支持
+  - 新增 PINN1d 模型架构支持
+  - 新增 `run_pinn_inference()` 函数用于 PINN 推理
+  - DiffSorpDataset 新增 `get_pinn_coords_and_target()` 方法
+  - 自动检测 PINN 模型并使用正确的推理方式
+
+- **2025-12-07**: 初始版本
+  - 支持 Darcy Flow, Burgers, Diff-Sorp 三个任务
+  - 支持 UNet 和 FNO 两种模型架构
+  - 批量推理带进度显示
+  - 结果保存（预测数组 + 指标）

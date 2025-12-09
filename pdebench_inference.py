@@ -898,11 +898,6 @@ def list_available_models(directory: str | Path = ".") -> list[dict[str, Any]]:
 
     return models
 
-
-# =============================================================================
-# Example usage and testing
-# =============================================================================
-
 # =============================================================================
 # Dataset Loading for Batch Inference
 # =============================================================================
@@ -961,6 +956,48 @@ DEFAULT_TASKS = {
         reduced_resolution_t=1,
     ),
 }
+
+# Small model configurations (for LLM integration)
+# These use smaller spatial/temporal resolution for compact input/output
+SMALL_MODEL_TASKS = {
+    "darcy_small": TaskConfig(
+        name="2D Darcy Flow (Small)",
+        dataset_file="2D_DarcyFlow_beta1.0_Train.hdf5",
+        model_checkpoints=[
+            "2D_DarcyFlow_beta1.0_Train_Unet_small.pt",
+            "2D_DarcyFlow_beta1.0_Train_FNO_small.pt",
+        ],
+        initial_step=1,
+        reduced_resolution=4,  # 128 -> 32
+    ),
+    "burgers_small": TaskConfig(
+        name="1D Burgers (Small)",
+        dataset_file="1D_Burgers_Sols_Nu1.0.hdf5",
+        model_checkpoints=[
+            # "1D_Burgers_Sols_Nu1.0_Unet_small.pt",
+            "1D_Burgers_Sols_Nu1.0_Unet_small-PF-10.pt",
+            "1D_Burgers_Sols_Nu1.0_FNO_small.pt",
+        ],
+        initial_step=5,
+        reduced_resolution=16,   # 1024 -> 64
+        reduced_resolution_t=5,  # 201 -> ~40
+    ),
+    "diffsorp_small": TaskConfig(
+        name="1D Diff-Sorp (Small)",
+        dataset_file="1D_diff-sorp_NA_NA.h5",
+        model_checkpoints=[
+            "1D_diff-sorp_NA_NA_Unet_small.pt",
+            "1D_diff-sorp_NA_NA_Unet_small-PF-10.pt",
+            "1D_diff-sorp_NA_NA_FNO_small.pt",
+        ],
+        initial_step=5,
+        reduced_resolution=16,   # 1024 -> 64
+        reduced_resolution_t=2,  # 101 -> ~50
+    ),
+}
+
+# Merge small model tasks into default tasks
+ALL_TASKS = {**DEFAULT_TASKS, **SMALL_MODEL_TASKS}
 
 
 class PDEDataset:
@@ -1115,9 +1152,17 @@ class DiffSorpDataset(PDEDataset):
         self,
         file_path: str | Path,
         initial_step: int = 10,
+        reduced_resolution: int = 1,
+        reduced_resolution_t: int = 1,
         **kwargs,
     ):
-        super().__init__(file_path, initial_step=initial_step, **kwargs)
+        super().__init__(
+            file_path,
+            initial_step=initial_step,
+            reduced_resolution=reduced_resolution,
+            reduced_resolution_t=reduced_resolution_t,
+            **kwargs
+        )
         self._file = None
         self._seeds = None
         self._load_data()
@@ -1133,9 +1178,13 @@ class DiffSorpDataset(PDEDataset):
 
     def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
         seed = self._seeds[idx]
+        r = self.reduced_resolution
+        rt = self.reduced_resolution_t
         # data shape: (101, 1024, 1)
         data = self._file[seed]["data"][:]
         data = data.squeeze(-1)  # (101, 1024)
+        # Apply downsampling
+        data = data[::rt, ::r]  # (T_down, Nx_down)
         # Input: first initial_step time steps
         input_data = data[:self.initial_step, :]  # (initial_step, Nx)
         # Target: next time step
@@ -1143,10 +1192,13 @@ class DiffSorpDataset(PDEDataset):
         return input_data.astype(np.float32), target.astype(np.float32)
 
     def get_full_trajectory(self, idx: int) -> np.ndarray:
-        """Get the full trajectory for autoregressive evaluation."""
+        """Get the full downsampled trajectory for autoregressive evaluation."""
         seed = self._seeds[idx]
+        r = self.reduced_resolution
+        rt = self.reduced_resolution_t
         data = self._file[seed]["data"][:]
-        return data.squeeze(-1).astype(np.float32)
+        data = data.squeeze(-1)  # (101, 1024)
+        return data[::rt, ::r].astype(np.float32)
 
     def prepare_input_unet(self, data: np.ndarray) -> np.ndarray:
         """Prepare input for UNet1d: [B, T, Nx]."""
@@ -1492,6 +1544,7 @@ def run_all_models(
     batch_size: int = 32,
     save_predictions: bool = True,
     device: str | None = None,
+    include_small: bool = True,
 ) -> dict[str, InferenceResult]:
     """
     Run inference on all available models and datasets.
@@ -1500,11 +1553,14 @@ def run_all_models(
         data_dir: Directory containing datasets and model checkpoints
         output_dir: Directory to save results
         tasks: List of tasks to evaluate (default: all available)
+            - Standard tasks: "darcy", "burgers", "diffsorp"
+            - Small model tasks: "darcy_small", "burgers_small", "diffsorp_small"
         models: List of specific model files to use (default: all for each task)
         n_samples: Number of samples to evaluate (default: all)
         batch_size: Batch size for inference
         save_predictions: Whether to save prediction arrays
         device: Device to run on (default: auto)
+        include_small: Whether to include small model tasks when tasks is None
 
     Returns:
         Dictionary mapping model names to InferenceResult
@@ -1515,17 +1571,20 @@ def run_all_models(
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
 
+    # Select task configurations
+    available_tasks = ALL_TASKS if include_small else DEFAULT_TASKS
+
     if tasks is None:
-        tasks = list(DEFAULT_TASKS.keys())
+        tasks = list(available_tasks.keys())
 
     results = {}
 
     for task_name in tasks:
-        if task_name not in DEFAULT_TASKS:
+        if task_name not in available_tasks:
             print(f"Warning: Unknown task '{task_name}', skipping...")
             continue
 
-        task_config = DEFAULT_TASKS[task_name]
+        task_config = available_tasks[task_name]
         dataset_path = data_dir / task_config.dataset_file
 
         if not dataset_path.exists():
@@ -1537,25 +1596,30 @@ def run_all_models(
         print(f"Dataset: {dataset_path.name}")
         print(f"{'='*60}")
 
-        # Load dataset
-        if task_name == "darcy":
+        # Load dataset based on task type (handle both standard and small tasks)
+        base_task = task_name.replace("_small", "")  # Get base task name
+
+        if base_task == "darcy":
             dataset = DarcyDataset(
                 dataset_path,
                 reduced_resolution=task_config.reduced_resolution,
             )
-        elif task_name == "burgers":
+        elif base_task == "burgers":
             dataset = BurgersDataset(
                 dataset_path,
                 initial_step=task_config.initial_step,
                 reduced_resolution=task_config.reduced_resolution,
                 reduced_resolution_t=task_config.reduced_resolution_t,
             )
-        elif task_name == "diffsorp":
+        elif base_task == "diffsorp":
             dataset = DiffSorpDataset(
                 dataset_path,
                 initial_step=task_config.initial_step,
+                reduced_resolution=task_config.reduced_resolution,
+                reduced_resolution_t=task_config.reduced_resolution_t,
             )
         else:
+            print(f"Warning: Unknown base task '{base_task}', skipping...")
             continue
 
         # Determine sample indices
@@ -1681,8 +1745,10 @@ Examples:
     mode_group.add_argument("--checkpoint", type=str, help="Load a single checkpoint for testing")
 
     # Batch inference options
-    parser.add_argument("--tasks", nargs="+", choices=["darcy", "burgers", "diffsorp"],
-                        help="Tasks to evaluate (default: all)")
+    parser.add_argument("--tasks", nargs="+",
+                        choices=["darcy", "burgers", "diffsorp",
+                                 "darcy_small", "burgers_small", "diffsorp_small"],
+                        help="Tasks to evaluate (default: all). Use *_small for small models.")
     parser.add_argument("--models", nargs="+", help="Specific model checkpoint files to use")
     parser.add_argument("--n-samples", type=int, help="Number of samples to evaluate (default: all)")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size (default: 32)")
@@ -1691,6 +1757,10 @@ Examples:
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], help="Device to use")
     parser.add_argument("--no-save-predictions", action="store_true",
                         help="Don't save prediction arrays (only metrics)")
+    parser.add_argument("--small-only", action="store_true",
+                        help="Only evaluate small models (for LLM integration)")
+    parser.add_argument("--original-only", action="store_true",
+                        help="Only evaluate original models (exclude small models)")
 
     args = parser.parse_args()
 
@@ -1699,24 +1769,46 @@ Examples:
         for model_info in list_available_models(args.data_dir):
             print(f"  {model_info['name']}: {model_info['model_type']}")
 
-        print("\nAvailable tasks:")
+        print("\nAvailable tasks (original models):")
         for task_name, task_config in DEFAULT_TASKS.items():
             dataset_path = Path(args.data_dir) / task_config.dataset_file
             status = "found" if dataset_path.exists() else "NOT FOUND"
             print(f"  {task_name}: {task_config.name}")
             print(f"    Dataset: {task_config.dataset_file} [{status}]")
+            print(f"    Resolution: {task_config.reduced_resolution}x (spatial)")
+            print(f"    Models: {', '.join(task_config.model_checkpoints)}")
+
+        print("\nAvailable tasks (small models for LLM):")
+        for task_name, task_config in SMALL_MODEL_TASKS.items():
+            dataset_path = Path(args.data_dir) / task_config.dataset_file
+            status = "found" if dataset_path.exists() else "NOT FOUND"
+            print(f"  {task_name}: {task_config.name}")
+            print(f"    Dataset: {task_config.dataset_file} [{status}]")
+            print(f"    Resolution: {task_config.reduced_resolution}x (spatial)")
             print(f"    Models: {', '.join(task_config.model_checkpoints)}")
 
     elif args.run_all:
+        # Determine which tasks to include based on flags
+        if args.small_only:
+            tasks = args.tasks or list(SMALL_MODEL_TASKS.keys())
+            include_small = True
+        elif args.original_only:
+            tasks = args.tasks or list(DEFAULT_TASKS.keys())
+            include_small = False
+        else:
+            tasks = args.tasks
+            include_small = True
+
         results = run_all_models(
             data_dir=args.data_dir,
             output_dir=args.output,
-            tasks=args.tasks,
+            tasks=tasks,
             models=args.models,
             n_samples=args.n_samples,
             batch_size=args.batch_size,
             save_predictions=not args.no_save_predictions,
             device=args.device,
+            include_small=include_small,
         )
 
     elif args.checkpoint:
