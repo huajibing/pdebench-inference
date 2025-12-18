@@ -4,17 +4,6 @@
 
 **注意**：这些样本对应的模型与原始 PDEBench 预训练模型的维度不同。
 
-## 文件列表
-
-| 文件 | 任务 | 模型 | 输入形状 | 输出形状 |
-|------|------|------|----------|----------|
-| `darcy_unet2d_sample.txt` | 2D Darcy Flow | UNet2d | (32, 32) | (32, 32) |
-| `darcy_fno2d_sample.txt` | 2D Darcy Flow | FNO2d | (32, 32) | (32, 32) |
-| `burgers_unet1d_sample.txt` | 1D Burgers | UNet1d | (5, 64) | (64,) |
-| `burgers_fno1d_sample.txt` | 1D Burgers | FNO1d | (64, 5) | (64,) |
-| `diffsorp_unet1d_sample.txt` | 1D Diff-Sorp | UNet1d | (5, 64) | (64,) |
-| `diffsorp_fno1d_sample.txt` | 1D Diff-Sorp | FNO1d | (64, 5) | (64,) |
-
 ## 维度对比
 
 | 任务 | 原始维度 | 小维度 | 下采样因子 |
