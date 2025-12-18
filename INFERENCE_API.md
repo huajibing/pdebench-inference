@@ -331,15 +331,15 @@ concentration = predictor.predict(coords).reshape(50, 100)
 
 ## 4. 可用模型总结
 
-| 任务 | 模型 | Checkpoint 文件 | 输入格式 | 预训练参数 |
-|------|------|----------------|----------|-----------|
-| 2D Darcy Flow | UNet2d | `2D_DarcyFlow_beta1.0_Train_Unet_small.pt` | `[B, 1, 32, 32]` | reduced_resolution=4 |
-| 2D Darcy Flow | FNO2d | `2D_DarcyFlow_beta1.0_Train_FNO_small.pt` | `[B, 32, 32, 1]` | modes=8, width=16 |
-| 1D Burgers | UNet1d | `1D_Burgers_Sols_Nu1.0_Unet_small.pt` | `[B, 5, 64]` | initial_step=5, reduced_resolution=16 |
-| 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO_small.pt` | `[B, 64, 5]` | modes=8, width=16, initial_step=5 |
-| 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet_small.pt` | `[B, 5, 64]` | initial_step=5, reduced_resolution=16 |
-| 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO_small.pt` | `[B, 64, 5]` | modes=8, width=16, initial_step=5 |
-| 1D Diff-Sorp | **PINN1d** | `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt` | `[N, 2]` | hidden=40, layers=7 |
+| 任务 | 模型 | Checkpoint 文件 | 输入格式 | 输出格式 | 预训练参数 |
+|------|------|----------------|----------|-----------|-------|
+| 2D Darcy Flow | UNet2d | `2D_DarcyFlow_beta1.0_Train_Unet_small.pt` | `[B, 1, 32, 32]` | `[B, 1, 32, 32]` | reduced_resolution=4 |
+| 2D Darcy Flow | FNO2d | `2D_DarcyFlow_beta1.0_Train_FNO_small.pt` | `[B, 32, 32, 1]` | `[B, 32, 32, 1, 1]` | modes=8, width=16 |
+| 1D Burgers | UNet1d | `1D_Burgers_Sols_Nu1.0_Unet_small.pt` | `[B, 5, 64]` | `[B, 1, 64]` | initial_step=5, reduced_resolution=16 |
+| 1D Burgers | FNO1d | `1D_Burgers_Sols_Nu1.0_FNO_small.pt` | `[B, 64, 5]` | `[B, 64, 1, 1]` | modes=8, width=16, initial_step=5 |
+| 1D Diff-Sorp | UNet1d | `1D_diff-sorp_NA_NA_Unet_small.pt` | `[B, 5, 64]` | `[B, 1, 64]` | initial_step=5, reduced_resolution=16 |
+| 1D Diff-Sorp | FNO1d | `1D_diff-sorp_NA_NA_FNO_small.pt` | `[B, 64, 5]` | `[B, 64, 1, 1]` | modes=8, width=16, initial_step=5 |
+| 1D Diff-Sorp | **PINN1d** | `1D_diff-sorp_NA_NA_0001.h5_PINN.pt-15000.pt` | `[N, 2]` | `[N, 1]` | hidden=40, layers=7 |
 
 ---
 
